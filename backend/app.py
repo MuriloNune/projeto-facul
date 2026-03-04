@@ -1,15 +1,18 @@
 import os
 import re
+import threading
+import time
 from datetime import datetime
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from supabase import create_client, Client
 from validate_docbr import CPF
 from dotenv import load_dotenv
+import webbrowser
 
 load_dotenv()
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder=None)  # Desabilita o static_folder padrão
 CORS(app)
 
 supabase: Client = create_client(
@@ -49,7 +52,7 @@ def paciente_existe(email: str = None, cpf: str = None) -> bool:
     resposta = query.execute()
     return len(resposta.data) > 0
 
-# ==================== Rotas ====================
+# ==================== Rotas da API ====================
 @app.route('/api/pacientes', methods=['POST'])
 def cadastrar_paciente():
     dados = request.json
@@ -235,5 +238,51 @@ def verificar_disponibilidade():
         'disponivel': disponivel
     })
 
+# ==================== Rotas para servir arquivos estáticos e HTML ====================
+
+@app.route('/')
+def serve_index():
+    """Serve a página inicial index.html"""
+    return send_from_directory(os.getcwd(), 'index.html')
+
+@app.route('/<path:filename>')
+def serve_static_or_html(filename):
+    """
+    Serve arquivos estáticos (css, js, img, etc.) ou páginas HTML.
+    Evita conflito com rotas da API.
+    """
+    # Se começar com 'api/', não é arquivo estático, retorna 404 para não mascarar rotas da API
+    if filename.startswith('api/'):
+        return jsonify({'erro': 'Rota não encontrada'}), 404
+
+    # Caminho completo para o arquivo solicitado
+    filepath = os.path.join(os.getcwd(), filename)
+
+    # Se for um diretório, tenta servir um index.html dentro dele (opcional)
+    if os.path.isdir(filepath):
+        index_inside = os.path.join(filepath, 'index.html')
+        if os.path.isfile(index_inside):
+            return send_from_directory(filepath, 'index.html')
+        # Se não houver index, retorna 404
+        return jsonify({'erro': 'Arquivo não encontrado'}), 404
+
+    # Se for um arquivo, tenta servir
+    if os.path.isfile(filepath):
+        # Extrai o diretório e o nome do arquivo
+        directory = os.path.dirname(filepath)
+        basename = os.path.basename(filepath)
+        return send_from_directory(directory, basename)
+
+    # Se não encontrou, retorna 404
+    return jsonify({'erro': 'Arquivo não encontrado'}), 404
+
+# ==================== Função para abrir o navegador ====================
+def abrir_navegador():
+    time.sleep(1.5)  # Aguarda o servidor iniciar
+    webbrowser.open('http://127.0.0.1:5000')
+
 if __name__ == '__main__':
-    app.run(debug=True)
+    # Inicia a thread que abrirá o navegador
+    threading.Thread(target=abrir_navegador).start()
+    # Inicia o servidor Flask
+    app.run(debug=True, use_reloader=False)
